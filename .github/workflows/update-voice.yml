@@ -10,6 +10,7 @@ on:
   schedule:
     # Every Sunday 23:17 UTC = Monday 07:17 China Standard Time
     - cron: "17 23 * * 0"
+    # Harmless comment added to trigger a one-time verification run.
 
 permissions:
   contents: write
