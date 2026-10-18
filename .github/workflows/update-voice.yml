@@ -8,8 +8,8 @@ on:
       - ".github/workflows/update-voice.yml"
       - "scripts/build_voice_rules.py"
   schedule:
-    # 23:17 UTC = 07:17 China Standard Time
-    - cron: "17 23 * * *"
+    # Every Sunday 23:17 UTC = Monday 07:17 China Standard Time
+    - cron: "17 23 * * 0"
 
 permissions:
   contents: write
