@@ -1,0 +1,93 @@
+name: Update ChatGPT Voice IP rules
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/update-voice.yml"
+      - "scripts/build_voice_rules.py"
+  schedule:
+    # 23:17 UTC = 07:17 China Standard Time
+    - cron: "17 23 * * *"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: update-chatgpt-voice-rules
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download official OpenAI Voice JSON
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error --location --retry 3 \
+            https://openai.com/chatgpt-voice.json \
+            --output chatgpt-voice.json
+          test -s chatgpt-voice.json
+          python3 -m json.tool chatgpt-voice.json >/dev/null
+
+      - name: Extract and validate CIDR networks
+        run: python3 scripts/build_voice_rules.py
+
+      - name: Download latest Mihomo release
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json
+          import urllib.request
+
+          api = "https://api.github.com/repos/MetaCubeX/mihomo/releases/latest"
+          request = urllib.request.Request(api, headers={"User-Agent": "chatgpt-voice-rules-builder"})
+          with urllib.request.urlopen(request, timeout=30) as response:
+              release = json.load(response)
+
+          assets = [
+              item for item in release.get("assets", [])
+              if "linux-amd64" in item.get("name", "").lower()
+              and item.get("name", "").lower().endswith(".gz")
+          ]
+          if not assets:
+              raise SystemExit("No Linux amd64 gzip asset found in the latest Mihomo release")
+
+          assets.sort(key=lambda item: ("compatible" not in item["name"].lower(), item["name"]))
+          asset = assets[0]
+          print("Mihomo release:", release.get("tag_name"))
+          print("Asset:", asset["name"])
+          request = urllib.request.Request(asset["browser_download_url"], headers={"User-Agent": "chatgpt-voice-rules-builder"})
+          with urllib.request.urlopen(request, timeout=120) as response:
+              payload = response.read()
+          with open("mihomo.gz", "wb") as output:
+              output.write(payload)
+          PY
+          gzip -t mihomo.gz
+          gzip -dc mihomo.gz > mihomo
+          chmod +x mihomo
+          ./mihomo -v
+
+      - name: Compile MRS rule set
+        run: |
+          set -euo pipefail
+          ./mihomo convert-ruleset ipcidr text voice.txt voice.mrs
+          test -s voice.mrs
+          ls -lh voice.txt voice.mrs
+
+      - name: Commit updated rules if changed
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add voice.txt voice.mrs
+          if git diff --cached --quiet; then
+            echo "Rules have not changed."
+            exit 0
+          fi
+          git commit -m "chore: update ChatGPT Voice IP rules"
+          git push
